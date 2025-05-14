@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cubeo Manual Play</title>
+<style>
+html,body{height:100%;margin:0;display:flex;flex-direction:column;font-family:sans-serif;user-select:none}
+.toolbar{background:#ddd;padding:4px 8px;display:flex;justify-content:center;align-items:center;gap:10px;font-size:14px}
+.pool{height:100px;display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;overflow:visible}
+#topPool,#bottomPool{background:#eee}
+#board{flex:1;background:#7ab474;position:relative;border:4px solid #333;overflow:visible}
+.die{width:60px;height:60px;line-height:60px;text-align:center;font-size:28px;font-weight:bold;border-radius:8px;border:2px solid #333;box-sizing:border-box;cursor:pointer;transition:width .15s,height .15s,line-height .15s,font-size .15s}
+.die.white{background:#fff;color:#000}
+.die.black{background:#000;color:#fff}
+.selected{outline:4px solid yellow}
+button:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <label for="sizeSlider">Dice size:</label>
+  <input id="sizeSlider" type="range" min="40" max="100" value="60" step="2">
+  <span id="sizeValue">60</span>px
+  <button id="undoBtn" disabled>Undo</button>
+  <button id="resetBtn">Reset Game</button>
+</div>
+<div id="topPool" class="pool"></div>
+<div id="board"></div>
+<div id="bottomPool" class="pool"></div>
+
+<script>
+(()=>{
+/********** Globals **********/
+const STORAGE_KEY='cubeoSave_v2';
+let DIE_SIZE=60;
+const board=document.getElementById('board');
+const topPool=document.getElementById('topPool');
+const bottomPool=document.getElementById('bottomPool');
+const sizeSlider=document.getElementById('sizeSlider');
+const sizeValue=document.getElementById('sizeValue');
+const undoBtn=document.getElementById('undoBtn');
+const resetBtn=document.getElementById('resetBtn');
+
+let selected=[];
+const history=[];const HISTORY_CAP=50;
+/********** Helpers **********/
+const setDieDim=d=>{d.style.width=d.style.height=DIE_SIZE+'px';d.style.lineHeight=DIE_SIZE+'px';d.style.fontSize=Math.floor(DIE_SIZE*0.45)+'px';};
+const pid=el=>el.parentElement===board?'board':(el.parentElement===topPool?'topPool':'bottomPool');
+const deselect=()=>{selected.forEach(el=>el.classList.remove('selected'));selected=[];};
+const win=(c,t)=>{if(t>6)alert(c.charAt(0).toUpperCase()+c.slice(1)+' player wins with a '+t+'!');};
+/********** Snapshot **********/
+const makeSnap=()=>({s:DIE_SIZE,d:[...document.querySelectorAll('.die')].map(d=>{const r={id:d.id,v:+d.dataset.value,p:pid(d)};if(r.p==='board'){r.x=parseFloat(d.style.left)||0;r.y=parseFloat(d.style.top)||0;}return r;})});
+const applySnap=s=>{if(!s||!s.d)return;DIE_SIZE=s.s||60;sizeSlider.value=DIE_SIZE;sizeValue.textContent=DIE_SIZE;document.querySelectorAll('.die').forEach(setDieDim);deselect();s.d.forEach(r=>{const d=document.getElementById(r.id);d.dataset.value=r.v;d.textContent=r.v;const par=r.p==='board'?board:(r.p==='topPool'?topPool:bottomPool);par.appendChild(d);if(r.p==='board'){d.style.position='absolute';d.style.left=r.x+'px';d.style.top=r.y+'px';}else{d.style.position='static';d.style.left=d.style.top='';}});};
+const save=()=>localStorage.setItem(STORAGE_KEY,JSON.stringify(makeSnap()));
+const load=()=>{try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');}catch{return null;}};
+const pushUndo=()=>{history.push(JSON.parse(JSON.stringify(makeSnap())));if(history.length>HISTORY_CAP)history.shift();undoBtn.disabled=false;};
+/********** Dice factory **********/
+const resetPool=d=>{d.classList.remove('selected');d.style.position='static';d.style.left=d.style.top=d.style.zIndex='';(d.dataset.color==='black'?topPool:bottomPool).appendChild(d);};
+function createDie(color,val,id){const d=document.createElement('div');d.className=`die ${color}`;d.textContent=val;d.dataset.value=val;d.dataset.color=color;d.id=id;setDieDim(d);d.dragging=false;d.addEventListener('click',()=>{if(d.dragging)return;d.classList.toggle('selected');if(d.classList.contains('selected')){selected.push(d);if(selected.length>2)selected.shift().classList.remove('selected');}else selected=selected.filter(x=>x!==d);mergeCheck();});d.addEventListener('pointerdown',e=>{d.dragging=false;const r=d.getBoundingClientRect();const offX=e.clientX-r.left,offY=e.clientY-r.top;d.setPointerCapture(e.pointerId);const move=ev=>{if(!d.dragging){d.dragging=true;pushUndo();d.style.position='fixed';d.style.zIndex='1000';}d.style.left=ev.clientX-offX+'px';d.style.top=ev.clientY-offY+'px';};const up=ev=>{d.releasePointerCapture(ev.pointerId);d.removeEventListener('pointermove',move);d.removeEventListener('pointerup',up);if(d.dragging){const br=board.getBoundingClientRect();if(ev.clientX>=br.left&&ev.clientX<=br.right&&ev.clientY>=br.top&&ev.clientY<=br.bottom){d.style.position='absolute';d.style.zIndex='';d.style.left=ev.clientX-offX-br.left+'px';d.style.top=ev.clientY-offY-br.top+'px';board.appendChild(d);}else resetPool(d);save();}setTimeout(()=>d.dragging=false,50);};d.addEventListener('pointermove',move);d.addEventListener('pointerup',up);});return d;}
+/********** Merge **********/
+function mergeCheck(){if(selected.length!==2)return;const[a,b]=selected;if(a.dataset.color!==b.dataset.color){deselect();return;}pushUndo();const keep=b,other=a;const sum=+a.dataset.value + +b.dataset.value;keep.dataset.value=sum;keep.textContent=sum;resetPool(other);deselect();save();win(keep.dataset.color,sum);}
+/********** Layout **********/
+function center(){const b0=document.getElementById('black0');const w0=document.getElementById('white0');const rect=board.getBoundingClientRect();const cx=rect.width/2,cy=rect.height/2;[b0,w0].forEach(d=>d.style.position='absolute');b0.style.left=(cx-DIE_SIZE-2)+'px';w0.style.left=(cx+2)+'px';b0.style.top=w0.style.top=(cy-DIE_SIZE/2)+'px';}
+/********** Init **********/
+function init(){for(let i=0;i<6;i++){const blk=createDie('black',1,'black'+i);const w=createDie('white',1,'white'+i);if(i===0){board.appendChild(blk);board.appendChild(w);}else{topPool.appendChild(blk);bottomPool.appendChild(w);}}const s=load();if(s)applySnap(s);else{center();save();}history.length=0;undoBtn.disabled=true;}
+/********** Events **********/
+undoBtn.addEventListener('click',()=>{if(!history.length)return;applySnap(history.pop());undoBtn.disabled=history.length===0;save();});
+resetBtn.addEventListener('click',()=>{pushUndo();DIE_SIZE=60;sizeSlider.value=60;sizeValue.textContent=60;document.querySelectorAll('.die').forEach(d=>{d.dataset.value=1;d.textContent=1;setDieDim(d);resetPool(d);});board.appendChild(document.getElementById('black0'));board.appendChild(document.getElementById('white0'));center();save();});
+sizeSlider.addEventListener('input',e=>{DIE_SIZE=+e.target.value;sizeValue.textContent=DIE_SIZE;document.querySelectorAll('.die').forEach(setDieDim);center();save();});
+window.addEventListener('resize',center);
+
+init();
+})();
+</script>
+</body>
+</html>
